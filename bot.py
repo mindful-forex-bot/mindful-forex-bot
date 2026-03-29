@@ -1,4 +1,5 @@
 import yfinance as yf
+import pandas as pd
 import pandas_ta as ta
 import asyncio
 import os
@@ -32,36 +33,34 @@ async def send_msg(pair, action, price, sl):
 async def run_scan():
     for symbol in SYMBOLS:
         print(f"Scanning {symbol}...")
-        # Get enough data for the 22-period calculation
         df = yf.download(symbol, period="5d", interval="1h", progress=False)
         
         if df.empty or len(df) < 25:
             print(f"Skipping {symbol}: Need more data.")
             continue
 
-        # FIX: The function is called 'cdl' in the library, not 'chandelier'
-        df.ta.cdl(length=22, multiplier=3, append=True)
+        # MANUAL CHANDELIER CALCULATION (Prevents library crashes)
+        # 1. Calculate ATR
+        df['ATR'] = df.ta.atr(length=22)
         
-        # Find the columns (they usually look like CHAND_LONG... or CHAND_SHORT...)
-        long_col = [c for c in df.columns if 'CHAND_LONG' in c]
-        short_col = [c for c in df.columns if 'CHAND_SHORT' in c]
-
-        if not long_col or not short_col:
-            print(f"Skipping {symbol}: Chandelier columns not found.")
-            continue
+        # 2. Calculate Highest High and Lowest Low over 22 periods
+        df['HH'] = df['High'].rolling(window=22).max()
+        df['LL'] = df['Low'].rolling(window=22).min()
+        
+        # 3. Calculate Chandelier Lines
+        df['Chandelier_Long'] = df['HH'] - (df['ATR'] * 3)
+        df['Chandelier_Short'] = df['LL'] + (df['ATR'] * 3)
 
         latest = df.iloc[-1]
         prev = df.iloc[-2]
-        L_VAL = latest[long_col[0]]
-        S_VAL = latest[short_col[0]]
-        P_L_VAL = prev[long_col[0]]
-        P_S_VAL = prev[short_col[0]]
 
-        # Signal Logic
-        if latest['Close'] > L_VAL and prev['Close'] <= P_L_VAL:
-            await send_msg(symbol, "BUY 📈", latest['Close'], L_VAL)
-        elif latest['Close'] < S_VAL and prev['Close'] >= P_S_VAL:
-            await send_msg(symbol, "SELL 📉", latest['Close'], S_VAL)
+        # Logic: Price crosses ABOVE Chandelier Long = BUY
+        if latest['Close'] > latest['Chandelier_Long'] and prev['Close'] <= prev['Chandelier_Long']:
+            await send_msg(symbol, "BUY 📈", latest['Close'], latest['Chandelier_Long'])
+            
+        # Logic: Price crosses BELOW Chandelier Short = SELL
+        elif latest['Close'] < latest['Chandelier_Short'] and prev['Close'] >= prev['Chandelier_Short']:
+            await send_msg(symbol, "SELL 📉", latest['Close'], latest['Chandelier_Short'])
         else:
             print(f"No signal for {symbol} right now.")
 
