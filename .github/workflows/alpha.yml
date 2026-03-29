@@ -1,4 +1,4 @@
-name: Mindful Alpha Bot
+name: Mindful forex Bot
 
 on:
   schedule:
@@ -15,10 +15,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'  # <--- UPDATED THIS LINE
 
       - name: Install Libraries
-        run: pip install yfinance pandas-ta python-telegram-bot
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas-ta python-telegram-bot
 
       - name: Run Bot
         env:
