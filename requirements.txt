@@ -1,1 +1,4 @@
-
+pandas-ta
+python-telegram-bot
+twelvedata
+yfinance
