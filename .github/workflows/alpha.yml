@@ -1,28 +1,29 @@
-name: Mindful Alpha Trading Bot
+name: Mindful Forex Bot Scan
 
 on:
   schedule:
+    # Runs every 15 minutes
     - cron: '*/15 * * * *'
-  workflow_dispatch:
+  workflow_dispatch: # Allows you to run it manually for testing
 
 jobs:
-  build:
+  scan:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/checkout@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install pandas numpy python-telegram-bot twelvedata
+          pip install pandas numpy twelvedata python-telegram-bot
 
-      - name: Run Trading Bot
+      - name: Run Mindful Alpha Scan
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
