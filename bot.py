@@ -10,8 +10,9 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 TD_KEY = os.getenv("TWELVE_DATA_KEY")
 
-# Your official Mindful Alpha Elite 8 Watchlist
-SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "AUD/USD", "USD/CAD", "BTC/USD"]
+# Official Watchlist - Stick to top 4 to stay under 800-credit daily limit with MTC
+# Or run every 30 minutes for all 8 symbols.
+SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "BTC/USD"]
 
 async def send_msg(pair, action, price, sl):
     bot = telegram.Bot(token=TOKEN)
@@ -21,8 +22,7 @@ async def send_msg(pair, action, price, sl):
     risk = abs(price - sl)
     tp = price + (risk * 2) if "BUY" in action else price - (risk * 2)
     
-    # Formatting for clean output
-    # Forex uses 5 decimals, Gold/BTC use 2
+    # Formatting precision
     prec = 2 if any(x in pair for x in ["XAU", "BTC"]) else 5
 
     msg = (
@@ -32,7 +32,7 @@ async def send_msg(pair, action, price, sl):
         f"**Entry:** {price:.{prec}f}\n"
         f"**Take Profit:** {tp:.{prec}f} 🎯\n"
         f"**Stop Loss:** {sl:.{prec}f} 🛑\n\n"
-        f"✨ _Mindful Trading Exclusive_"
+        f"✨ _Trend Aligned | Mindful Trading Exclusive_"
     )
     
     try:
@@ -43,7 +43,6 @@ async def send_msg(pair, action, price, sl):
         print(f"❌ Telegram Error: {e}")
 
 def calculate_chandelier(df, period=22, multiplier=2.5):
-    # Manual ATR Calculation
     high_low = df['High'] - df['Low']
     high_close = (df['High'] - df['Close'].shift()).abs()
     low_close = (df['Low'] - df['Close'].shift()).abs()
@@ -51,7 +50,6 @@ def calculate_chandelier(df, period=22, multiplier=2.5):
     true_range = np.max(ranges, axis=1)
     atr = true_range.rolling(period).mean()
 
-    # Chandelier Logic
     long_stop = df['High'].rolling(period).max() - (atr * multiplier)
     short_stop = df['Low'].rolling(period).min() + (atr * multiplier)
     return long_stop, short_stop
@@ -59,33 +57,47 @@ def calculate_chandelier(df, period=22, multiplier=2.5):
 async def run_scan():
     td = TDClient(apikey=TD_KEY)
     for symbol in SYMBOLS:
-        print(f"--- 15M Scan: {symbol} ---")
+        print(f"--- MTC Scan (15M + 1H): {symbol} ---")
         try:
-            ts = td.time_series(symbol=symbol, interval="15min", outputsize=100)
-            df = ts.as_pandas()
-            if df is None or df.empty:
-                print(f"⚠️ No data for {symbol}.")
-                continue
+            # 1. GET 1-HOUR TREND DATA
+            ts_1h = td.time_series(symbol=symbol, interval="1h", outputsize=50)
+            df_1h = ts_1h.as_pandas()
+            df_1h.columns = [c.capitalize() for c in df_1h.columns]
+            df_1h = df_1h.sort_index(ascending=True)
+            ch_long_1h, ch_short_1h = calculate_chandelier(df_1h)
+            
+            is_bullish_1h = df_1h.iloc[-1]['Close'] > ch_long_1h.iloc[-1]
+            is_bearish_1h = df_1h.iloc[-1]['Close'] < ch_short_1h.iloc[-1]
 
-            df.columns = [c.capitalize() for c in df.columns]
-            df = df.sort_index(ascending=True)
+            # 2. GET 15-MINUTE ENTRY DATA
+            ts_15 = td.time_series(symbol=symbol, interval="15min", outputsize=50)
+            df_15 = ts_15.as_pandas()
+            df_15.columns = [c.capitalize() for c in df_15.columns]
+            df_15 = df_15.sort_index(ascending=True)
+            df_15['Ch_Long'], df_15['Ch_Short'] = calculate_chandelier(df_15)
 
-            # Manual Math (No pandas-ta needed!)
-            df['Ch_Long'], df['Ch_Short'] = calculate_chandelier(df)
+            latest = df_15.iloc[-1]
+            prev = df_15.iloc[-2]
 
-            latest = df.iloc[-1]
-            prev = df.iloc[-2]
-
-            # Trigger check
+            # 3. TRIGGER LOGIC WITH TREND FILTER
+            # BUY only if 1H trend is up
             if latest['Close'] > latest['Ch_Long'] and prev['Close'] <= prev['Ch_Long']:
-                await send_msg(symbol, "BUY 📈", latest['Close'], latest['Ch_Long'])
+                if is_bullish_1h:
+                    await send_msg(symbol, "BUY 📈", latest['Close'], latest['Ch_Long'])
+                else:
+                    print(f"⚠️ {symbol} Buy signal ignored (1H Trend Bearish)")
+
+            # SELL only if 1H trend is down
             elif latest['Close'] < latest['Ch_Short'] and prev['Close'] >= prev['Ch_Short']:
-                await send_msg(symbol, "SELL 📉", latest['Close'], latest['Ch_Short'])
+                if is_bearish_1h:
+                    await send_msg(symbol, "SELL 📉", latest['Close'], latest['Ch_Short'])
+                else:
+                    print(f"⚠️ {symbol} Sell signal ignored (1H Trend Bullish)")
+            
             else:
                 print(f"No signal for {symbol}.")
             
-            # 2-second sleep to stay safe within Twelve Data free tier limits
-            time.sleep(2) 
+            time.sleep(2) # Safe buffer for Twelve Data
             
         except Exception as e:
             print(f"❌ Error scanning {symbol}: {e}")
