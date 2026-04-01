@@ -10,19 +10,18 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 TD_KEY = os.getenv("TWELVE_DATA_KEY")
 
-# Official Watchlist - Stick to top 4 to stay under 800-credit daily limit with MTC
-# Or run every 30 minutes for all 8 symbols.
+# Official Watchlist - Core 4 for MTC consistency
 SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "BTC/USD"]
 
 async def send_msg(pair, action, price, sl):
     bot = telegram.Bot(token=TOKEN)
     display_name = "GOLD (XAU/USD)" if "XAU" in pair else pair
     
-    # Calculate a 1:2 Risk/Reward Take Profit
+    # NEW: Calculate a 1:3 Risk/Reward for BIGGER PIP gains
     risk = abs(price - sl)
-    tp = price + (risk * 2) if "BUY" in action else price - (risk * 2)
+    tp = price + (risk * 3) if "BUY" in action else price - (risk * 3)
     
-    # Formatting precision
+    # Formatting precision (Forex uses 5, Gold/BTC use 2)
     prec = 2 if any(x in pair for x in ["XAU", "BTC"]) else 5
 
     msg = (
@@ -32,17 +31,18 @@ async def send_msg(pair, action, price, sl):
         f"**Entry:** {price:.{prec}f}\n"
         f"**Take Profit:** {tp:.{prec}f} 🎯\n"
         f"**Stop Loss:** {sl:.{prec}f} 🛑\n\n"
-        f"✨ _Trend Aligned | Mindful Trading Exclusive_"
+        f"✨ _High Reward | Trend Aligned Exclusive_"
     )
     
     try:
         async with bot:
             await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
-        print(f"✅ Signal sent for {display_name}")
+        print(f"✅ Big Pip Signal sent for {display_name}")
     except Exception as e:
         print(f"❌ Telegram Error: {e}")
 
-def calculate_chandelier(df, period=22, multiplier=2.5):
+# NEW: Multiplier increased to 3.5 to filter out wiggles and catch major moves
+def calculate_chandelier(df, period=22, multiplier=3.5):
     high_low = df['High'] - df['Low']
     high_close = (df['High'] - df['Close'].shift()).abs()
     low_close = (df['Low'] - df['Close'].shift()).abs()
@@ -80,14 +80,12 @@ async def run_scan():
             prev = df_15.iloc[-2]
 
             # 3. TRIGGER LOGIC WITH TREND FILTER
-            # BUY only if 1H trend is up
             if latest['Close'] > latest['Ch_Long'] and prev['Close'] <= prev['Ch_Long']:
                 if is_bullish_1h:
                     await send_msg(symbol, "BUY 📈", latest['Close'], latest['Ch_Long'])
                 else:
                     print(f"⚠️ {symbol} Buy signal ignored (1H Trend Bearish)")
 
-            # SELL only if 1H trend is down
             elif latest['Close'] < latest['Ch_Short'] and prev['Close'] >= prev['Ch_Short']:
                 if is_bearish_1h:
                     await send_msg(symbol, "SELL 📉", latest['Close'], latest['Ch_Short'])
@@ -97,7 +95,7 @@ async def run_scan():
             else:
                 print(f"No signal for {symbol}.")
             
-            time.sleep(2) # Safe buffer for Twelve Data
+            time.sleep(2) 
             
         except Exception as e:
             print(f"❌ Error scanning {symbol}: {e}")
