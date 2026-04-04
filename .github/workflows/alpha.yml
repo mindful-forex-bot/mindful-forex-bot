@@ -1,10 +1,9 @@
-name: Mindful Forex Bot Scanner
-
+name: MTC Logic Scanner
 on:
   schedule:
-    # This triggers every 15 minutes (:00, :15, :30, :45)
+    # Runs every 15 minutes (Standard for 15m candle entry)
     - cron: '*/15 * * * *'
-  workflow_dispatch: # Allows you to force-run it for testing
+  workflow_dispatch: # Allows you to trigger it manually for testing
 
 jobs:
   scan:
@@ -14,18 +13,20 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip' # Speeds up future runs
 
       - name: Install Dependencies
         run: |
-          pip install pandas numpy twelvedata python-telegram-bot
+          python -m pip install --upgrade pip
+          pip install pandas numpy twelvedata python-telegram-bot mplfinance
 
-      - name: Run MTC Strategy
+      - name: Run MTC Scan
         env:
-          # These MUST match the names in your GitHub Secrets
-          TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
+          # These MUST be added to your GitHub Repo Secrets
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-        run: python your_script_name.py # Change to your actual file name
+          TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
+        run: python bot.py
