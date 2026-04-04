@@ -4,6 +4,7 @@ import asyncio
 import os
 import telegram
 import time
+import mplfinance as mpf
 from twelvedata import TDClient
 
 # --- CONFIGURATION ---
@@ -13,55 +14,53 @@ TD_KEY = os.getenv("TWELVE_DATA_KEY")
 
 SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "BTC/USD"]
 
-# Helper: Professional Pip Calculation
-def get_pips(pair, entry, current, action):
-    if any(x in pair for x in ["XAU", "BTC", "JPY"]):
-        multiplier = 10 if "XAU" in pair else 1 # Gold uses 10 for standard pip feel
-    else:
-        multiplier = 10000 # Standard Forex
+def generate_chart(df, symbol, entry, tp, sl):
+    """Generates a professional signal chart with TP/SL lines."""
+    plot_df = df.tail(30).copy()
+    plot_df.index = pd.to_datetime(plot_df.index)
     
-    diff = current - entry if "BUY" in action else entry - current
-    return round(diff * multiplier, 1)
+    # Define horizontal lines: Entry (Blue), TP (Green), SL (Red)
+    h_lines = dict(hlines=[entry, tp, sl], 
+                   colors=['#3498db', '#2ecc71', '#e74c3c'], 
+                   linestyle='dashed', linewidths=1.5)
 
-async def send_pre_alert(pair):
-    """Sends a heads-up so people can open their apps ASAP."""
-    bot = telegram.Bot(token=TOKEN)
-    display_name = "GOLD (XAU/USD)" if "XAU" in pair else pair
-    msg = (
-        f"🏛️ **MINDFUL PRE-ALERT**\n\n"
-        f"**Asset:** {display_name}\n"
-        f"**Status:** MTC Logic is detecting high volume. 📊\n"
-        f"📢 _Get ready. Signal incoming shortly._"
-    )
-    async with bot:
-        await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
+    file_path = f"signal_{symbol.replace('/', '_')}.png"
+    mpf.plot(plot_df, type='candle', style='charles',
+             title=f"\n{symbol} Signal Analysis",
+             hlines=h_lines, savefig=file_path, tight_layout=True)
+    return file_path
 
-async def send_msg(pair, action, price, sl):
+async def send_msg(pair, action, price, sl, df_for_chart):
     bot = telegram.Bot(token=TOKEN)
     display_name = "GOLD (XAU/USD)" if "XAU" in pair else pair
     
-    # 1:3 Risk/Reward
     risk = abs(price - sl)
     tp = price + (risk * 3) if "BUY" in action else price - (risk * 3)
-    
     prec = 2 if any(x in pair for x in ["XAU", "BTC"]) else 5
 
+    # Generate the chart image
+    chart_file = generate_chart(df_for_chart, pair, price, tp, sl)
+
     msg = (
-        f"🚨 **MINDFUL FOREX BOT SIGNAL**\n\n"
+        f"🚨 **MINDFUL SIGNAL**\n\n"
         f"**Asset:** {display_name}\n"
         f"**Action:** {action}\n\n"
         f"**Entry:** {price:.{prec}f}\n"
         f"**Take Profit:** {tp:.{prec}f} 🎯\n"
         f"**Stop Loss:** {sl:.{prec}f} 🛑\n\n"
-        f"✨ _High Reward | Trend Aligned Exclusive_"
+        f"✨ _High Reward | Trend Aligned_"
     )
     
     try:
         async with bot:
-            await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
-        print(f"✅ Signal sent for {display_name}")
+            with open(chart_file, 'rb') as photo:
+                await bot.send_photo(chat_id=CHANNEL_ID, photo=photo, caption=msg, parse_mode="Markdown")
+        print(f"✅ Visual Signal sent for {display_name}")
     except Exception as e:
         print(f"❌ Telegram Error: {e}")
+    finally:
+        if os.path.exists(chart_file):
+            os.remove(chart_file)
 
 def calculate_chandelier(df, period=22, multiplier=3.5):
     high_low = df['high'] - df['low']
@@ -78,39 +77,30 @@ def calculate_chandelier(df, period=22, multiplier=3.5):
 async def run_scan():
     td = TDClient(apikey=TD_KEY)
     for symbol in SYMBOLS:
-        print(f"--- MTC Scan: {symbol} ---")
         try:
-            # 1. 1-HOUR TREND
+            # Optimize: Get 1h and 15m in one loop
             ts_1h = td.time_series(symbol=symbol, interval="1h", outputsize=50).as_pandas()
             ch_long_1h, ch_short_1h = calculate_chandelier(ts_1h)
-            is_bullish_1h = ts_1h.iloc[-1]['close'] > ch_long_1h.iloc[-1]
-            is_bearish_1h = ts_1h.iloc[-1]['close'] < ch_short_1h.iloc[-1]
-
-            # 2. 15-MINUTE ENTRY
+            
             ts_15 = td.time_series(symbol=symbol, interval="15min", outputsize=50).as_pandas()
             ch_long_15, ch_short_15 = calculate_chandelier(ts_15)
 
             latest = ts_15.iloc[-1]
             prev = ts_15.iloc[-2]
 
-            # NEW: PRE-ALERT LOGIC (Price is within 0.05% of breaking the stop)
-            dist_to_long = abs(latest['close'] - ch_long_15.iloc[-1]) / latest['close']
-            if dist_to_long < 0.0005: # Very close to a breakout
-                 await send_pre_alert(symbol)
-
-            # 3. TRIGGER LOGIC
+            # TRIGGER LOGIC with Trend Alignment
             if latest['close'] > ch_long_15.iloc[-1] and prev['close'] <= ch_long_15.iloc[-2]:
-                if is_bullish_1h:
-                    await send_msg(symbol, "BUY 📈", latest['close'], ch_long_15.iloc[-1])
+                if ts_1h.iloc[-1]['close'] > ch_long_1h.iloc[-1]: # Trend Check
+                    await send_msg(symbol, "BUY 📈", latest['close'], ch_long_15.iloc[-1], ts_15)
 
             elif latest['close'] < ch_short_15.iloc[-1] and prev['close'] >= ch_short_15.iloc[-2]:
-                if is_bearish_1h:
-                    await send_msg(symbol, "SELL 📉", latest['close'], ch_short_15.iloc[-1])
+                if ts_1h.iloc[-1]['close'] < ch_short_1h.iloc[-1]: # Trend Check
+                    await send_msg(symbol, "SELL 📉", latest['close'], ch_short_15.iloc[-1], ts_15)
             
-            time.sleep(1) 
+            time.sleep(2) # Avoid rate limits
             
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"❌ Error scanning {symbol}: {e}")
 
 if __name__ == "__main__":
     asyncio.run(run_scan())
