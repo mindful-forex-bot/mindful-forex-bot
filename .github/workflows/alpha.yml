@@ -16,21 +16,20 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # UPDATED: 3.12 is required for the latest pandas_ta and pandas versions
+          # Use 3.12 to support the latest pandas_ta and numba versions
           python-version: '3.12'
           cache: 'pip'
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          # Including all necessary libraries for the new logic
           pip install pandas numpy twelvedata python-telegram-bot mplfinance pandas_ta python-dotenv
 
       - name: Run MTC Scan
         env:
-          # These must match your GitHub Repo > Settings > Secrets
+          # Ensure these match your GitHub Repo > Settings > Secrets
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
-        # REMINDER: Change 'your_script_name.py' to your actual filename (e.g. bot.py)
+        # CRITICAL: If your python file is named 'bot.py', change the name below.
         run: python your_script_name.py
