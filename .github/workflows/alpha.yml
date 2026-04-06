@@ -2,9 +2,9 @@ name: MTC Logic Scanner
 
 on:
   schedule:
-    # Runs every 15 minutes to match your 15m candle logic
+    # Runs every 15 minutes to align with your 15m candle logic
     - cron: '*/15 * * * *'
-  workflow_dispatch: # Allows you to trigger it manually from the "Actions" tab
+  workflow_dispatch: # Allows you to manually test it from the Actions tab
 
 jobs:
   scan:
@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # Use 3.12 to support the latest pandas_ta and numba versions
+          # Required for latest pandas_ta compatibility
           python-version: '3.12'
           cache: 'pip'
 
@@ -27,9 +27,8 @@ jobs:
 
       - name: Run MTC Scan
         env:
-          # Ensure these match your GitHub Repo > Settings > Secrets
+          # Ensure these match your Repository Secrets exactly
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
-        # CRITICAL: If your python file is named 'bot.py', change the name below.
-        run: python your_script_name.py
+        run: python bot.py
