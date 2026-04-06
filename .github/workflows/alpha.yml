@@ -28,5 +28,5 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
-        # This MUST match the file name in your GitHub folder
-        run: python your_script_name.py
+        # Changed this to match your new filename
+        run: python bot.py
