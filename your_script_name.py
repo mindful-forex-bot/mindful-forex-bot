@@ -5,6 +5,7 @@ import os
 import telegram
 import time
 import mplfinance as mpf
+import pandas_ta as ta  # Added for easier ADX calculation
 from twelvedata import TDClient
 
 # --- CONFIGURATION ---
@@ -14,12 +15,30 @@ TD_KEY = os.getenv("TWELVE_DATA_KEY")
 
 SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "BTC/USD"]
 
+def validate_signal_logic(action, entry, sl, adx_value):
+    """Checks for flipped logic and trend strength before sending."""
+    # 1. ADX Filter: If Trend is too strong (> 25), do not 'fade'
+    # Since your bot is trend-aligned (1h check), we check if ADX is EXTREME (> 45)
+    # which usually signals an exhaustive blow-off top/bottom.
+    if adx_value > 45:
+        print(f"⚠️ Signal Rejected: ADX is {adx_value:.2f} (Parabolic move risk)")
+        return False
+
+    # 2. Logic Sanity Check
+    if "BUY" in action and sl >= entry:
+        print(f"❌ Logic Error: BUY Stop Loss ({sl}) cannot be above Entry ({entry})")
+        return False
+    if "SELL" in action and sl <= entry:
+        print(f"❌ Logic Error: SELL Stop Loss ({sl}) cannot be below Entry ({entry})")
+        return False
+        
+    return True
+
 def generate_chart(df, symbol, entry, tp, sl):
     """Generates a professional signal chart with TP/SL lines."""
     plot_df = df.tail(30).copy()
     plot_df.index = pd.to_datetime(plot_df.index)
     
-    # Define horizontal lines: Entry (Blue), TP (Green), SL (Red)
     h_lines = dict(hlines=[entry, tp, sl], 
                    colors=['#3498db', '#2ecc71', '#e74c3c'], 
                    linestyle='dashed', linewidths=1.5)
@@ -30,15 +49,19 @@ def generate_chart(df, symbol, entry, tp, sl):
              hlines=h_lines, savefig=file_path, tight_layout=True)
     return file_path
 
-async def send_msg(pair, action, price, sl, df_for_chart):
+async def send_msg(pair, action, price, sl, df_for_chart, adx_val):
+    # Added validation check before doing anything
+    if not validate_signal_logic(action, price, sl, adx_val):
+        return
+
     bot = telegram.Bot(token=TOKEN)
     display_name = "GOLD (XAU/USD)" if "XAU" in pair else pair
     
     risk = abs(price - sl)
+    # Corrected TP Logic: Ensure TP is ALWAYS in the right direction
     tp = price + (risk * 3) if "BUY" in action else price - (risk * 3)
     prec = 2 if any(x in pair for x in ["XAU", "BTC"]) else 5
 
-    # Generate the chart image
     chart_file = generate_chart(df_for_chart, pair, price, tp, sl)
 
     msg = (
@@ -48,6 +71,7 @@ async def send_msg(pair, action, price, sl, df_for_chart):
         f"**Entry:** {price:.{prec}f}\n"
         f"**Take Profit:** {tp:.{prec}f} 🎯\n"
         f"**Stop Loss:** {sl:.{prec}f} 🛑\n\n"
+        f"📊 **ADX Strength:** {adx_val:.2f}\n"
         f"✨ _High Reward | Trend Aligned_"
     )
     
@@ -63,6 +87,7 @@ async def send_msg(pair, action, price, sl, df_for_chart):
             os.remove(chart_file)
 
 def calculate_chandelier(df, period=22, multiplier=3.5):
+    # Standard math for ATR-based stops
     high_low = df['high'] - df['low']
     high_close = (df['high'] - df['close'].shift()).abs()
     low_close = (df['low'] - df['close'].shift()).abs()
@@ -78,8 +103,11 @@ async def run_scan():
     td = TDClient(apikey=TD_KEY)
     for symbol in SYMBOLS:
         try:
-            # Optimize: Get 1h and 15m in one loop
             ts_1h = td.time_series(symbol=symbol, interval="1h", outputsize=50).as_pandas()
+            # Calculate ADX on 1H to gauge trend health
+            adx_df = ts_1h.ta.adx(length=14)
+            current_adx = adx_df['ADX_14'].iloc[-1]
+            
             ch_long_1h, ch_short_1h = calculate_chandelier(ts_1h)
             
             ts_15 = td.time_series(symbol=symbol, interval="15min", outputsize=50).as_pandas()
@@ -88,16 +116,16 @@ async def run_scan():
             latest = ts_15.iloc[-1]
             prev = ts_15.iloc[-2]
 
-            # TRIGGER LOGIC with Trend Alignment
+            # TRIGGER LOGIC: 15m Crossover + 1h Trend Confirmation
             if latest['close'] > ch_long_15.iloc[-1] and prev['close'] <= ch_long_15.iloc[-2]:
-                if ts_1h.iloc[-1]['close'] > ch_long_1h.iloc[-1]: # Trend Check
-                    await send_msg(symbol, "BUY 📈", latest['close'], ch_long_15.iloc[-1], ts_15)
+                if ts_1h.iloc[-1]['close'] > ch_long_1h.iloc[-1]: 
+                    await send_msg(symbol, "BUY 📈", latest['close'], ch_long_15.iloc[-1], ts_15, current_adx)
 
             elif latest['close'] < ch_short_15.iloc[-1] and prev['close'] >= ch_short_15.iloc[-2]:
-                if ts_1h.iloc[-1]['close'] < ch_short_1h.iloc[-1]: # Trend Check
-                    await send_msg(symbol, "SELL 📉", latest['close'], ch_short_15.iloc[-1], ts_15)
+                if ts_1h.iloc[-1]['close'] < ch_short_1h.iloc[-1]:
+                    await send_msg(symbol, "SELL 📉", latest['close'], ch_short_15.iloc[-1], ts_15, current_adx)
             
-            time.sleep(2) # Avoid rate limits
+            time.sleep(2) 
             
         except Exception as e:
             print(f"❌ Error scanning {symbol}: {e}")
