@@ -2,8 +2,9 @@ name: MTC Logic Scanner
 
 on:
   schedule:
+    # Runs every 15 minutes to align with your 15m candle strategy
     - cron: '*/15 * * * *'
-  workflow_dispatch: 
+  workflow_dispatch: # Allows you to trigger the bot manually from GitHub Actions tab
 
 jobs:
   scan:
@@ -11,12 +12,14 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
+          cache: 'pip' # Speeds up runs by caching your libraries
 
       - name: Install Dependencies
         run: |
@@ -25,6 +28,7 @@ jobs:
 
       - name: Run MTC Scan
         env:
+          # These must match the names in your GitHub Settings > Secrets
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
