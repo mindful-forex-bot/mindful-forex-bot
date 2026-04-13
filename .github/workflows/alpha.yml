@@ -9,7 +9,9 @@ on:
 
 jobs:
   scan:
-    runs-on: ubuntu-latest
+    # CRITICAL: MT5 library ONLY works on Windows
+    runs-on: windows-latest 
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -25,11 +27,16 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy twelvedata python-telegram-bot mplfinance pandas_ta python-dotenv
+          pip install pandas numpy twelvedata python-telegram-bot pandas_ta python-dotenv MetaTrader5
 
       - name: Run MTC Scan
         env:
+          # Your existing secrets
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
+          # New MT5 secrets (Make sure to add these in GitHub Settings!)
+          MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+          MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+          MT5_SERVER: ${{ secrets.MT5_SERVER }}
         run: python bot.py
