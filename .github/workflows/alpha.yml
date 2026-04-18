@@ -25,11 +25,12 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy twelvedata python-telegram-bot mplfinance pandas_ta python-dotenv
+          pip install pandas numpy twelvedata python-telegram-bot pandas_ta python-dotenv
 
       - name: Run MTC Scan
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
+        # Ensure your script file is named bot.py or change this line to match your filename
         run: python bot.py
