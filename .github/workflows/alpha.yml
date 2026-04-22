@@ -2,10 +2,9 @@ name: MTC Logic Scanner
 
 on:
   schedule:
-    # Runs at the start of every hour (e.g., 1:00, 2:00) 
-    # This aligns with the close of the 1H candle for your new strategy.
+    # Runs at the start of every hour (UTC)
     - cron: '0 * * * *'
-  workflow_dispatch: # Allows manual triggering if you want to check the market now
+  workflow_dispatch: # Allows you to manually trigger it from GitHub
 
 jobs:
   scan:
@@ -13,14 +12,11 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
 
       - name: Install Dependencies
         run: |
@@ -32,5 +28,4 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
-        # Ensure your script file is named bot.py or change this line to match your filename
         run: python bot.py
