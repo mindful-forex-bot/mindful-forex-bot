@@ -12,11 +12,9 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 TD_KEY = os.getenv("TWELVE_DATA_KEY")
 SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "BTC/USD"]
 
-# --- NEW: PROP FIRM CHALLENGE SETTINGS ---
-STARTING_BALANCE = 200000.00  # Based on your $200k screenshot
-MAX_TOTAL_LOSS = 10000.00     # Hard fail at $10k loss
-DAILY_LOSS_LIMIT = 5000.00    # Hard fail at $5k daily loss
-# Note: In a live bot, you'd pull 'current_equity' from your broker API (like MT5)
+# --- FILTER SETTINGS ---
+PIP_FLOOR = 15.0  # <--- STOP SMALL SIGNALS: Bot will ignore anything under 15 pips
+MIN_ADX = 30.0    # Ensure trend strength
 
 def calculate_chandelier(df, period=22, multiplier=3.0):
     """MFBS Custom Chandelier Exit."""
@@ -29,10 +27,19 @@ def calculate_chandelier(df, period=22, multiplier=3.0):
 async def send_msg(pair, action, price, sl, adx_val, status_msg="Trend Aligned"):
     bot = telegram.Bot(token=TOKEN)
     
+    # Calculate Risk and TP (3:1 Reward-to-Risk)
     risk = abs(price - sl)
     tp = price + (risk * 3) if "BUY" in action else price - (risk * 3)
+    
+    # Pip Calculation Logic
     mult = 100 if "XAU" in pair or "JPY" in pair else 10000
     pips = abs(price - tp) * mult
+    
+    # --- THE GATEKEEPER: Stop small signals from being sent ---
+    if pips < PIP_FLOOR:
+        print(f"⚠️ Signal Blocked: {pair} {action} only has {pips:.1f} pips. (Floor is {PIP_FLOOR})")
+        return # This exits the function before the Telegram message is sent
+
     prec = 2 if "XAU" in pair or "BTC" in pair else 5
 
     msg = (f"🛡 **MFBS LOGIC SCANNER**\n"
@@ -50,19 +57,9 @@ async def send_msg(pair, action, price, sl, adx_val, status_msg="Trend Aligned")
         await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
 
 async def run_scan():
-    print(f"🔍 MFBS Logic: Scanning H1 with High-Probability Filters...")
+    print(f"🔍 MFBS Logic: Scanning H1 | Pip Floor: {PIP_FLOOR}...")
     td = TDClient(apikey=TD_KEY)
     
-    # --- NEW: EQUITY GUARD CHECK ---
-    # This is a placeholder. You would connect your broker API here to get 'equity'.
-    # For now, it prevents the bot from sending signals if you are in deep drawdown.
-    mock_equity = 197759.00  # This matches your current screenshot
-    total_drawdown = STARTING_BALANCE - mock_equity
-
-    if total_drawdown >= (MAX_TOTAL_LOSS * 0.8): # Warn/Stop at 80% of limit
-        print(f"⚠️ SHIELD ACTIVE: Drawdown is ${total_drawdown:.2f}. Blocking new signals.")
-        return 
-
     for symbol in SYMBOLS:
         try:
             # 1. Check DAILY Trend
@@ -78,27 +75,21 @@ async def run_scan():
             adx_df = ts_h1.ta.adx(length=14)
             adx_h1 = adx_df['ADX_14'].iloc[-1]
             rsi_h1 = ts_h1.ta.rsi(length=14).iloc[-1]
-            current_atr = atr_h1.iloc[-1]
             
             latest = ts_h1.iloc[-1]
             prev = ts_h1.iloc[-2]
 
-            MIN_ADX = 30.0 
-            min_volatility = 0.0010 if "USD" in symbol else 1.0 
-
             # BUY Logic
             if latest['close'] > ch_long_h1.iloc[-1] and prev['close'] <= ch_long_h1.iloc[-2]:
                 if daily_bullish and adx_h1 > MIN_ADX and rsi_h1 < 65:
-                    if (current_atr * 3) > min_volatility:
-                        await send_msg(symbol, "BUY 📈", latest['close'], ch_long_h1.iloc[-1], adx_h1)
+                    await send_msg(symbol, "BUY 📈", latest['close'], ch_long_h1.iloc[-1], adx_h1)
 
             # SELL Logic
             elif latest['close'] < ch_short_h1.iloc[-1] and prev['close'] >= ch_short_h1.iloc[-2]:
                 if daily_bearish and adx_h1 > MIN_ADX and rsi_h1 > 35:
-                    if (current_atr * 3) > min_volatility:
-                        await send_msg(symbol, "SELL 📉", latest['close'], ch_short_h1.iloc[-1], adx_h1)
+                    await send_msg(symbol, "SELL 📉", latest['close'], ch_short_h1.iloc[-1], adx_h1)
 
-            print(f"✅ {symbol} check complete (ADX: {adx_h1:.2f})")
+            print(f"✅ {symbol} check complete.")
             await asyncio.sleep(1)
 
         except Exception as e:
