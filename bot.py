@@ -60,7 +60,7 @@ async def send_msg(pair, action, price, sl, adx_val, fng_info, status_msg="Londo
     pips = abs(price - tp) * mult
     
     if pips < PIP_FLOOR:
-        return 
+        return False # Signal rejected by floor
 
     prec = 2 if "XAU" in pair or "BTC" in pair else 5
 
@@ -77,18 +77,20 @@ async def send_msg(pair, action, price, sl, adx_val, fng_info, status_msg="Londo
 
     async with bot:
         await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
+    return True
 
 async def run_scan():
-    if not is_london_session():
-        print("💤 Market Lull: Outside London hours. Scanner sleeping...")
-        return
-
     # Fetch Market Sentiment for the run
     fng_val, fng_label = get_sentiment()
     fng_info = f"{fng_val} ({fng_label})"
+
+    if not is_london_session():
+        print(f"💤 Market Lull: Outside London hours. Current Sentiment: {fng_info}")
+        return
+
     print(f"🔍 MFBS Logic: Scanning H1 | Sentiment: {fng_info}")
-    
     td = TDClient(apikey=TD_KEY)
+    signal_triggered = False # Track if any signal was sent
     
     for symbol in SYMBOLS:
         try:
@@ -107,7 +109,7 @@ async def run_scan():
             prev = ts_h1.iloc[-2]
             mult = 100 if "XAU" in symbol or "JPY" in symbol else 10000
 
-            # BUY Logic + Sentiment Filter
+            # BUY Logic
             if latest['close'] > ch_l_h1.iloc[-1] and prev['close'] <= ch_l_h1.iloc[-2]:
                 if symbol == "BTC/USD" and fng_val >= EXTREME_GREED:
                     print(f"⚠️ {symbol} Buy Blocked: Sentiment too greedy ({fng_val})")
@@ -115,11 +117,10 @@ async def run_scan():
                     chase_dist = (latest['close'] - ch_l_h1.iloc[-1]) * mult
                     if chase_dist <= MAX_CHASE_PIPS:
                         if daily_bullish and adx_h1 > MIN_ADX and rsi_h1 < 65:
-                            await send_msg(symbol, "BUY 📈", latest['close'], ch_l_h1.iloc[-1], adx_h1, fng_info)
-                    else:
-                        print(f"⚠️ {symbol} Buy skipped: Price moved {chase_dist:.1f} pips past entry.")
-
-            # SELL Logic + Sentiment Filter
+                            sent = await send_msg(symbol, "BUY 📈", latest['close'], ch_l_h1.iloc[-1], adx_h1, fng_info)
+                            if sent: signal_triggered = True
+            
+            # SELL Logic
             elif latest['close'] < ch_s_h1.iloc[-1] and prev['close'] >= ch_s_h1.iloc[-2]:
                 if symbol == "BTC/USD" and fng_val <= EXTREME_FEAR:
                     print(f"⚠️ {symbol} Sell Blocked: Sentiment in extreme panic ({fng_val})")
@@ -127,15 +128,27 @@ async def run_scan():
                     chase_dist = (ch_s_h1.iloc[-1] - latest['close']) * mult
                     if chase_dist <= MAX_CHASE_PIPS:
                         if daily_bearish and adx_h1 > MIN_ADX and rsi_h1 > 35:
-                            await send_msg(symbol, "SELL 📉", latest['close'], ch_s_h1.iloc[-1], adx_h1, fng_info)
-                    else:
-                        print(f"⚠️ {symbol} Sell skipped: Price moved {chase_dist:.1f} pips past entry.")
+                            sent = await send_msg(symbol, "SELL 📉", latest['close'], ch_s_h1.iloc[-1], adx_h1, fng_info)
+                            if sent: signal_triggered = True
 
-            print(f"✅ {symbol} check complete.")
             await asyncio.sleep(1)
 
         except Exception as e:
             print(f"❌ Error scanning {symbol}: {e}")
+
+    # HOURLY NEWS BROADCAST: If no technical signal was fired, send a sentiment update
+    if not signal_triggered:
+        bot = telegram.Bot(token=TOKEN)
+        broadcast_msg = (
+            f"📊 **MTC HOURLY SENTIMENT REPORT**\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"**Current Mood:** {fng_info}\n\n"
+            f"**Market Note:** Technical setups are currently forming. No high-probability entries detected this hour. We stay patient and wait for logic confirmation. 🛡\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
+        async with bot:
+            await bot.send_message(chat_id=CHANNEL_ID, text=broadcast_msg, parse_mode="Markdown")
+        print("📢 Sentiment Broadcast Sent.")
 
 if __name__ == "__main__":
     asyncio.run(run_scan())
