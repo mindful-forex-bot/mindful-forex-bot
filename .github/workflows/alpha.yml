@@ -26,4 +26,4 @@ jobs:
       - name: Run MFBS Scanner
         env:
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
-        run: python alpha.py
+        run: python bot.py
