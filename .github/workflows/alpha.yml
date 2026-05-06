@@ -1,38 +1,31 @@
-name: MTC Logic Scanner
+name: MFBS Logic Scanner
 
 on:
   schedule:
-    # Runs at the start of every hour (UTC)
-    # Note: GitHub Actions can be delayed by 5-15 mins during peak times.
+    # Runs every hour, on the hour
     - cron: '0 * * * *'
-  workflow_dispatch: # Allows you to manually trigger it from GitHub Actions tab
+  workflow_dispatch: # Allows you to run it manually for testing
 
 jobs:
-  scan:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
-          cache: 'pip' # Speeds up execution by caching your libraries
+          python-version: '3.9'
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy twelvedata python-telegram-bot pandas_ta python-dotenv requests
+          pip install pandas numpy pandas_ta twelvedata requests
 
-      - name: Run MTC Scan
+      - name: Run MFBS Scanner
         env:
-          # These MUST be set in your GitHub Repo Settings > Secrets > Actions
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
-          # Hardcoded Filter Settings
-          PIP_FLOOR: 15.0
-          MIN_ADX: 30.0
-          MAX_CHASE_PIPS: 5.0
-        run: python bot.py
+          # Note: We removed Telegram secrets because ntfy doesn't need them!
+        run: python your_script_name.py
