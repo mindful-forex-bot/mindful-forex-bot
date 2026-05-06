@@ -8,7 +8,7 @@ from twelvedata import TDClient
 from datetime import datetime, time
 
 # --- MFBS LOGIC CONFIG ---
-NTFY_TOPIC = "mfbs" # This matches ntfy.sh/mfbs
+NTFY_TOPIC = "mfbs" 
 TD_KEY = os.getenv("TWELVE_DATA_KEY")
 SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "BTC/USD"]
 
@@ -48,9 +48,10 @@ def calculate_chandelier(df, period=22, multiplier=3.0):
     short_stop = df['low'].rolling(period).min() + (atr * multiplier)
     return long_stop, short_stop, atr 
 
-def send_ntfy_push(title, message, tags="chart_with_upwards_trend,moneybag", priority="high"):
+def send_ntfy_push(title, message, tags="chart,moneybag", priority="high"):
     """Broadcasts signal directly to the ntfy app on your phone."""
     try:
+        # Fixed: Encoding message as utf-8 and using text-only tags to avoid latin-1 errors
         requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", 
             data=message.encode('utf-8'),
             headers={
@@ -72,17 +73,19 @@ async def send_msg(pair, action, price, sl, adx_val, fng_info, status_msg="Londo
     pips = abs(price - tp) * mult
     
     if pips < PIP_FLOOR:
-        return False # Signal rejected by floor
+        return False 
 
     prec = 2 if "XAU" in pair or "BTC" in pair else 5
 
-    title = f"🛡 MFBS LOGIC: {pair}"
-    msg = (f"Action: {action} ({status_msg})\n\n"
+    # Moved emojis to message body to keep headers clean
+    title = f"MFBS LOGIC: {pair}"
+    msg = (f"{action} \n"
+           f"Context: {status_msg}\n\n"
            f"Entry: {price:.{prec}f}\n"
            f"TP: {tp:.{prec}f} 🎯 (+{pips:.1f} Pips)\n"
            f"SL: {sl:.{prec}f} 🛑\n\n"
            f"ADX: {adx_val:.2f} | Sentiment: {fng_info}\n"
-           f"Global Trend: Daily Confirmed")
+           f"Trend: Daily Confirmed")
 
     return send_ntfy_push(title, msg)
 
@@ -142,13 +145,13 @@ async def run_scan():
         except Exception as e:
             print(f"❌ Error scanning {symbol}: {e}")
 
-    # HOURLY NEWS BROADCAST: If no technical signal was fired
+    # HOURLY NEWS BROADCAST
     if not signal_triggered:
         broadcast_msg = (
             f"Mood: {fng_info}\n\n"
             f"No high-probability entries detected this hour. We stay patient. 🛡"
         )
-        send_ntfy_push("📊 HOURLY SENTIMENT REPORT", broadcast_msg, tags="bar_chart", priority="default")
+        send_ntfy_push("HOURLY SENTIMENT REPORT", broadcast_msg, tags="bar_chart", priority="default")
         print("📢 Sentiment Broadcast Sent to Phone.")
 
 if __name__ == "__main__":
