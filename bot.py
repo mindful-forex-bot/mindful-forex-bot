@@ -3,14 +3,12 @@ import numpy as np
 import asyncio
 import os
 import requests
-import telegram
 import pandas_ta as ta
 from twelvedata import TDClient
 from datetime import datetime, time
 
 # --- MFBS LOGIC CONFIG ---
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
+NTFY_TOPIC = "mfbs" # This matches ntfy.sh/mfbs
 TD_KEY = os.getenv("TWELVE_DATA_KEY")
 SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "BTC/USD"]
 
@@ -50,9 +48,23 @@ def calculate_chandelier(df, period=22, multiplier=3.0):
     short_stop = df['low'].rolling(period).min() + (atr * multiplier)
     return long_stop, short_stop, atr 
 
+def send_ntfy_push(title, message, tags="chart_with_upwards_trend,moneybag", priority="high"):
+    """Broadcasts signal directly to the ntfy app on your phone."""
+    try:
+        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", 
+            data=message.encode('utf-8'),
+            headers={
+                "Title": title,
+                "Priority": priority,
+                "Tags": tags,
+                "Click": "https://www.tradingview.com/chart/"
+            })
+        return True
+    except Exception as e:
+        print(f"❌ ntfy error: {e}")
+        return False
+
 async def send_msg(pair, action, price, sl, adx_val, fng_info, status_msg="London Session Active"):
-    bot = telegram.Bot(token=TOKEN)
-    
     risk = abs(price - sl)
     tp = price + (risk * 3) if "BUY" in action else price - (risk * 3)
     
@@ -64,23 +76,17 @@ async def send_msg(pair, action, price, sl, adx_val, fng_info, status_msg="Londo
 
     prec = 2 if "XAU" in pair or "BTC" in pair else 5
 
-    msg = (f"🛡 **MFBS LOGIC SCANNER**\n"
-           f"━━━━━━━━━━━━━━━━━━\n"
-           f"**Asset:** {pair}\n"
-           f"**Action:** {action} ({status_msg})\n\n"
-           f"**Entry:** {price:.{prec}f}\n"
-           f"**TP:** {tp:.{prec}f} 🎯 (+{pips:.1f} Pips)\n"
-           f"**SL:** {sl:.{prec}f} 🛑\n\n"
-           f"📈 **ADX:** {adx_val:.2f} | **Sentiment:** {fng_info}\n"
-           f"🌍 **Global Trend:** Daily Confirmed\n"
-           f"━━━━━━━━━━━━━━━━━━")
+    title = f"🛡 MFBS LOGIC: {pair}"
+    msg = (f"Action: {action} ({status_msg})\n\n"
+           f"Entry: {price:.{prec}f}\n"
+           f"TP: {tp:.{prec}f} 🎯 (+{pips:.1f} Pips)\n"
+           f"SL: {sl:.{prec}f} 🛑\n\n"
+           f"ADX: {adx_val:.2f} | Sentiment: {fng_info}\n"
+           f"Global Trend: Daily Confirmed")
 
-    async with bot:
-        await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
-    return True
+    return send_ntfy_push(title, msg)
 
 async def run_scan():
-    # Fetch Market Sentiment for the run
     fng_val, fng_label = get_sentiment()
     fng_info = f"{fng_val} ({fng_label})"
 
@@ -90,7 +96,7 @@ async def run_scan():
 
     print(f"🔍 MFBS Logic: Scanning H1 | Sentiment: {fng_info}")
     td = TDClient(apikey=TD_KEY)
-    signal_triggered = False # Track if any signal was sent
+    signal_triggered = False 
     
     for symbol in SYMBOLS:
         try:
@@ -112,7 +118,7 @@ async def run_scan():
             # BUY Logic
             if latest['close'] > ch_l_h1.iloc[-1] and prev['close'] <= ch_l_h1.iloc[-2]:
                 if symbol == "BTC/USD" and fng_val >= EXTREME_GREED:
-                    print(f"⚠️ {symbol} Buy Blocked: Sentiment too greedy ({fng_val})")
+                    print(f"⚠️ {symbol} Buy Blocked: Sentiment too greedy")
                 else:
                     chase_dist = (latest['close'] - ch_l_h1.iloc[-1]) * mult
                     if chase_dist <= MAX_CHASE_PIPS:
@@ -123,7 +129,7 @@ async def run_scan():
             # SELL Logic
             elif latest['close'] < ch_s_h1.iloc[-1] and prev['close'] >= ch_s_h1.iloc[-2]:
                 if symbol == "BTC/USD" and fng_val <= EXTREME_FEAR:
-                    print(f"⚠️ {symbol} Sell Blocked: Sentiment in extreme panic ({fng_val})")
+                    print(f"⚠️ {symbol} Sell Blocked: Sentiment in extreme panic")
                 else:
                     chase_dist = (ch_s_h1.iloc[-1] - latest['close']) * mult
                     if chase_dist <= MAX_CHASE_PIPS:
@@ -136,19 +142,14 @@ async def run_scan():
         except Exception as e:
             print(f"❌ Error scanning {symbol}: {e}")
 
-    # HOURLY NEWS BROADCAST: If no technical signal was fired, send a sentiment update
+    # HOURLY NEWS BROADCAST: If no technical signal was fired
     if not signal_triggered:
-        bot = telegram.Bot(token=TOKEN)
         broadcast_msg = (
-            f"📊 **MTC HOURLY SENTIMENT REPORT**\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"**Current Mood:** {fng_info}\n\n"
-            f"**Market Note:** Technical setups are currently forming. No high-probability entries detected this hour. We stay patient and wait for logic confirmation. 🛡\n"
-            f"━━━━━━━━━━━━━━━━━━"
+            f"Mood: {fng_info}\n\n"
+            f"No high-probability entries detected this hour. We stay patient. 🛡"
         )
-        async with bot:
-            await bot.send_message(chat_id=CHANNEL_ID, text=broadcast_msg, parse_mode="Markdown")
-        print("📢 Sentiment Broadcast Sent.")
+        send_ntfy_push("📊 HOURLY SENTIMENT REPORT", broadcast_msg, tags="bar_chart", priority="default")
+        print("📢 Sentiment Broadcast Sent to Phone.")
 
 if __name__ == "__main__":
     asyncio.run(run_scan())
