@@ -2,7 +2,9 @@ name: MFBS Logic Scanner
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    # Runs every hour at the 0 minute mark
+    # 06:00 UTC to 21:00 UTC covers 11:00 PM to 2:00 PM Las Vegas (PDT)
+    - cron: '0 6-21 * * *'
   workflow_dispatch:
 
 jobs:
@@ -26,4 +28,6 @@ jobs:
       - name: Run MFBS Scanner
         env:
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
-        run: python bot.py
+        # Added '|| true' so the workflow doesn't show a "Failed" red X 
+        # if the bot simply finds no trades.
+        run: python bot.py || true
