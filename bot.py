@@ -22,13 +22,24 @@ EXTREME_FEAR = 15     # Filter for BTC sells
 # --- SESSION TIMES (LAS VEGAS / PDT) ---
 LONDON_START = time(23, 0) # 11:00 PM
 LONDON_END = time(8, 0)    # 8:00 AM
+NY_START = time(5, 0)      # 5:00 AM
+NY_END = time(14, 0)       # 2:00 PM
 
-def is_london_session():
-    """Checks if current time is within high-volume London hours."""
+def get_active_session():
+    """Checks current time vs London and NY hours (PDT)."""
     now = datetime.now().time()
-    if now >= LONDON_START or now <= LONDON_END:
-        return True
-    return False
+    
+    is_london = now >= LONDON_START or now <= LONDON_END
+    is_ny = NY_START <= now <= NY_END
+    
+    if is_london and is_ny:
+        return True, "London/NY Overlap"
+    elif is_london:
+        return True, "London Session"
+    elif is_ny:
+        return True, "New York Session"
+    
+    return False, "Market Lull"
 
 def get_sentiment():
     """Fetches Crypto Fear & Greed Index (0-100)."""
@@ -51,7 +62,6 @@ def calculate_chandelier(df, period=22, multiplier=3.0):
 def send_ntfy_push(title, message, tags="chart,moneybag", priority="high"):
     """Broadcasts signal directly to the ntfy app on your phone."""
     try:
-        # Fixed: Encoding message as utf-8 and using text-only tags to avoid latin-1 errors
         requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", 
             data=message.encode('utf-8'),
             headers={
@@ -65,7 +75,7 @@ def send_ntfy_push(title, message, tags="chart,moneybag", priority="high"):
         print(f"❌ ntfy error: {e}")
         return False
 
-async def send_msg(pair, action, price, sl, adx_val, fng_info, status_msg="London Session Active"):
+async def send_msg(pair, action, price, sl, adx_val, fng_info, session_name):
     risk = abs(price - sl)
     tp = price + (risk * 3) if "BUY" in action else price - (risk * 3)
     
@@ -77,10 +87,9 @@ async def send_msg(pair, action, price, sl, adx_val, fng_info, status_msg="Londo
 
     prec = 2 if "XAU" in pair or "BTC" in pair else 5
 
-    # Moved emojis to message body to keep headers clean
     title = f"MFBS LOGIC: {pair}"
     msg = (f"{action} \n"
-           f"Context: {status_msg}\n\n"
+           f"Session: {session_name}\n\n"
            f"Entry: {price:.{prec}f}\n"
            f"TP: {tp:.{prec}f} 🎯 (+{pips:.1f} Pips)\n"
            f"SL: {sl:.{prec}f} 🛑\n\n"
@@ -93,11 +102,13 @@ async def run_scan():
     fng_val, fng_label = get_sentiment()
     fng_info = f"{fng_val} ({fng_label})"
 
-    if not is_london_session():
-        print(f"💤 Market Lull: Outside London hours. Current Sentiment: {fng_info}")
+    active, session_name = get_active_session()
+
+    if not active:
+        print(f"💤 {session_name}: Outside high-volume hours. Sentiment: {fng_info}")
         return
 
-    print(f"🔍 MFBS Logic: Scanning H1 | Sentiment: {fng_info}")
+    print(f"🔍 MFBS Logic: Scanning H1 | {session_name} | Sentiment: {fng_info}")
     td = TDClient(apikey=TD_KEY)
     signal_triggered = False 
     
@@ -126,7 +137,7 @@ async def run_scan():
                     chase_dist = (latest['close'] - ch_l_h1.iloc[-1]) * mult
                     if chase_dist <= MAX_CHASE_PIPS:
                         if daily_bullish and adx_h1 > MIN_ADX and rsi_h1 < 65:
-                            sent = await send_msg(symbol, "BUY 📈", latest['close'], ch_l_h1.iloc[-1], adx_h1, fng_info)
+                            sent = await send_msg(symbol, "BUY 📈", latest['close'], ch_l_h1.iloc[-1], adx_h1, fng_info, session_name)
                             if sent: signal_triggered = True
             
             # SELL Logic
@@ -137,7 +148,7 @@ async def run_scan():
                     chase_dist = (ch_s_h1.iloc[-1] - latest['close']) * mult
                     if chase_dist <= MAX_CHASE_PIPS:
                         if daily_bearish and adx_h1 > MIN_ADX and rsi_h1 > 35:
-                            sent = await send_msg(symbol, "SELL 📉", latest['close'], ch_s_h1.iloc[-1], adx_h1, fng_info)
+                            sent = await send_msg(symbol, "SELL 📉", latest['close'], ch_s_h1.iloc[-1], adx_h1, fng_info, session_name)
                             if sent: signal_triggered = True
 
             await asyncio.sleep(1)
@@ -145,14 +156,20 @@ async def run_scan():
         except Exception as e:
             print(f"❌ Error scanning {symbol}: {e}")
 
-    # HOURLY NEWS BROADCAST
     if not signal_triggered:
         broadcast_msg = (
+            f"Session: {session_name}\n"
             f"Mood: {fng_info}\n\n"
-            f"No high-probability entries detected this hour. We stay patient. 🛡"
+            f"No high-probability entries detected. We stay patient. 🛡"
         )
-        send_ntfy_push("HOURLY SENTIMENT REPORT", broadcast_msg, tags="bar_chart", priority="default")
-        print("📢 Sentiment Broadcast Sent to Phone.")
+        send_ntfy_push("MFBS SESSION REPORT", broadcast_msg, tags="bar_chart", priority="default")
+        print(f"📢 {session_name} Broadcast Sent.")
 
 if __name__ == "__main__":
+    async def loop():
+        while True:
+            await run_scan()
+            # Wait 1 hour before scanning again, or adjust for your cron/task schedule
+            await asyncio.sleep(3600) 
+            
     asyncio.run(run_scan())
