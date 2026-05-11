@@ -12,10 +12,10 @@ NTFY_TOPIC = "mfbs"
 TD_KEY = os.getenv("TWELVE_DATA_KEY")
 SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "BTC/USD"]
 
-# --- FILTER SETTINGS ---
-PIP_FLOOR = 15.0      
-MIN_ADX = 30.0        
-MAX_CHASE_PIPS = 5.0  
+# --- UPDATED FILTER SETTINGS (OPTIMIZED FOR H1) ---
+PIP_FLOOR = 10.0       # Lowered slightly to capture more moves
+MIN_ADX = 22.0        # Dropped from 30 to catch trends as they form
+MAX_CHASE_PIPS = 12.0  # Increased from 5 to account for H1 volatility/Gold jumps
 EXTREME_GREED = 85    # Filter for BTC buys
 EXTREME_FEAR = 15     # Filter for BTC sells
 
@@ -122,7 +122,9 @@ async def run_scan():
             ts_h1 = td.time_series(symbol=symbol, interval="1h", outputsize=100).as_pandas()
             ch_l_h1, ch_s_h1, _ = calculate_chandelier(ts_h1)
             
-            adx_h1 = ts_h1.ta.adx(length=14)['ADX_14'].iloc[-1]
+            # Using simple ADX and RSI from pandas_ta
+            adx_df = ts_h1.ta.adx(length=14)
+            adx_h1 = adx_df['ADX_14'].iloc[-1]
             rsi_h1 = ts_h1.ta.rsi(length=14).iloc[-1]
             
             latest = ts_h1.iloc[-1]
@@ -169,7 +171,9 @@ if __name__ == "__main__":
     async def loop():
         while True:
             await run_scan()
-            # Wait 1 hour before scanning again, or adjust for your cron/task schedule
+            # Scans once per hour
+            print("⏳ Sleeping for 1 hour...")
             await asyncio.sleep(3600) 
             
-    asyncio.run(run_scan())
+    # Now correctly calling the loop instead of just a single scan
+    asyncio.run(loop())
