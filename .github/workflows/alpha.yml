@@ -2,10 +2,11 @@ name: MFBS Logic Scanner
 
 on:
   schedule:
-    # Runs every hour at the 0 minute mark
-    # 06:00 UTC to 21:00 UTC covers 11:00 PM to 2:00 PM Las Vegas (PDT)
+    # 06:00 UTC is 11:00 PM PDT (London Start)
+    # 21:00 UTC is 2:00 PM PDT (NY Close)
+    # This runs every hour at the 0 minute mark during those hours
     - cron: '0 6-21 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # Allows you to run it manually to test the connection
 
 jobs:
   build:
@@ -13,10 +14,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -28,6 +29,6 @@ jobs:
       - name: Run MFBS Scanner
         env:
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
-        # Added '|| true' so the workflow doesn't show a "Failed" red X 
-        # if the bot simply finds no trades.
+        # Assuming your file is named bot.py
+        # '|| true' ensures the workflow stays green even if the script exits on a lull
         run: python bot.py || true
