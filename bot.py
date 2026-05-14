@@ -12,10 +12,14 @@ NTFY_TOPIC = "mfbs"
 TD_KEY = os.getenv("TWELVE_DATA_KEY")
 SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "BTC/USD"]
 
+# --- FORCE TEST MODE ---
+# Set this to True to force a notification immediately. Set to False for real trading.
+FORCE_SIGNAL = False 
+
 # --- LOOSENED FILTER SETTINGS ---
-PIP_FLOOR = 8.0         # Lowered from 10.0
-MIN_ADX = 18.0          # Lowered from 22.0
-MAX_CHASE_PIPS = 25.0   # Increased from 12.0
+PIP_FLOOR = 8.0         
+MIN_ADX = 18.0          
+MAX_CHASE_PIPS = 25.0   
 EXTREME_GREED = 90      
 EXTREME_FEAR = 10       
 
@@ -70,10 +74,7 @@ async def send_msg(pair, action, price, sl, adx_val, fng_info, session_name):
     risk = abs(price - sl)
     tp = price + (risk * 3) if "BUY" in action else price - (risk * 3)
     mult = 100 if "XAU" in pair or "JPY" in pair else 10000
-    pips = abs(price - tp) * mult
     
-    if pips < PIP_FLOOR: return False 
-
     prec = 2 if "XAU" in pair or "BTC" in pair else 5
     title = f"MFBS LOGIC: {pair}"
     msg = (f"{action} \nSession: {session_name}\n\n"
@@ -86,9 +87,9 @@ async def run_scan():
     fng_info = f"{fng_val} ({fng_label})"
     active, session_name = get_active_session()
 
-    # --- MODIFIED: BYPASS LULL FOR TESTING ---
+    # Bypass time check for testing/manual triggers
     if not active:
-        print(f"⚠️ Outside hours ({session_name}), but running scan anyway...")
+        print(f"⚠️ Outside hours ({session_name}), running anyway...")
         session_name = f"Testing ({session_name})"
     else:
         print(f"🔍 Starting MFBS Scan | {session_name}")
@@ -99,13 +100,11 @@ async def run_scan():
     for symbol in SYMBOLS:
         try:
             print(f"📡 Fetching {symbol}...")
+            # We fetch daily data but don't use it for filtering right now
             ts_d = td.time_series(symbol=symbol, interval="1day", outputsize=50).as_pandas()
             await asyncio.sleep(2) 
             ts_h1 = td.time_series(symbol=symbol, interval="1h", outputsize=100).as_pandas()
             
-            daily_bullish = True 
-            daily_bearish = True 
-
             ch_l_h1, ch_s_h1, _ = calculate_chandelier(ts_h1)
             adx_h1 = ts_h1.ta.adx(length=14)['ADX_14'].iloc[-1]
             rsi_h1 = ts_h1.ta.rsi(length=14).iloc[-1]
@@ -113,31 +112,34 @@ async def run_scan():
             latest, prev = ts_h1.iloc[-1], ts_h1.iloc[-2]
             mult = 100 if "XAU" in symbol or "JPY" in symbol else 10000
 
-            # BUY Logic
-            if latest['close'] > ch_l_h1.iloc[-1] and prev['close'] <= ch_l_h1.iloc[-2]:
-                if not (symbol == "BTC/USD" and fng_val >= EXTREME_GREED):
-                    dist = (latest['close'] - ch_l_h1.iloc[-1]) * mult
-                    if dist <= MAX_CHASE_PIPS and daily_bullish and adx_h1 > MIN_ADX and rsi_h1 < 75:
-                        if await send_msg(symbol, "BUY 📈", latest['close'], ch_l_h1.iloc[-1], adx_h1, fng_info, session_name):
-                            signal_triggered = True
-            
-            # SELL Logic
-            elif latest['close'] < ch_s_h1.iloc[-1] and prev['close'] >= ch_s_h1.iloc[-2]:
-                if not (symbol == "BTC/USD" and fng_val <= EXTREME_FEAR):
-                    dist = (ch_s_h1.iloc[-1] - latest['close']) * mult
-                    if dist <= MAX_CHASE_PIPS and daily_bearish and adx_h1 > MIN_ADX and rsi_h1 > 25:
-                        if await send_msg(symbol, "SELL 📉", latest['close'], ch_s_h1.iloc[-1], adx_h1, fng_info, session_name):
-                            signal_triggered = True
+            # --- LOGIC TRIGGER ---
+            is_buy = latest['close'] > ch_l_h1.iloc[-1] and prev['close'] <= ch_l_h1.iloc[-2]
+            is_sell = latest['close'] < ch_s_h1.iloc[-1] and prev['close'] >= ch_s_h1.iloc[-2]
 
-            print(f"✅ {symbol} complete. Pacing for rate limit...")
-            await asyncio.sleep(13)
+            if FORCE_SIGNAL:
+                await send_msg(symbol, "TEST BUY 🧪", latest['close'], ch_l_h1.iloc[-1], adx_h1, fng_info, session_name)
+                signal_triggered = True
+            
+            elif is_buy:
+                dist = (latest['close'] - ch_l_h1.iloc[-1]) * mult
+                if dist <= MAX_CHASE_PIPS and adx_h1 > MIN_ADX and rsi_h1 < 75:
+                    if await send_msg(symbol, "BUY 📈", latest['close'], ch_l_h1.iloc[-1], adx_h1, fng_info, session_name):
+                        signal_triggered = True
+            
+            elif is_sell:
+                dist = (ch_s_h1.iloc[-1] - latest['close']) * mult
+                if dist <= MAX_CHASE_PIPS and adx_h1 > MIN_ADX and rsi_h1 > 25:
+                    if await send_msg(symbol, "SELL 📉", latest['close'], ch_s_h1.iloc[-1], adx_h1, fng_info, session_name):
+                        signal_triggered = True
+
+            print(f"✅ {symbol} complete.")
+            await asyncio.sleep(12) # Rate limit protection
 
         except Exception as e:
             print(f"❌ Error {symbol}: {e}")
-            await asyncio.sleep(15)
 
     if not signal_triggered:
-        send_ntfy_push("MFBS SESSION REPORT", f"Session: {session_name}\nNo entries found. Patience pays.", tags="bar_chart", priority="default")
+        send_ntfy_push("MFBS REPORT", "No valid entries found.", tags="bar_chart", priority="low")
 
 if __name__ == "__main__":
     asyncio.run(run_scan())
