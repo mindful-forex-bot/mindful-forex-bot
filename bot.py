@@ -14,10 +14,10 @@ SYMBOLS = ["XAU/USD", "EUR/USD", "GBP/USD", "BTC/USD"]
 
 # --- LOOSENED FILTER SETTINGS ---
 PIP_FLOOR = 8.0         # Lowered from 10.0
-MIN_ADX = 18.0          # Lowered from 22.0 (Catch trends earlier)
-MAX_CHASE_PIPS = 25.0   # Increased from 12.0 (More room for fast moves)
-EXTREME_GREED = 90      # Increased from 85
-EXTREME_FEAR = 10       # Decreased from 15
+MIN_ADX = 18.0          # Lowered from 22.0
+MAX_CHASE_PIPS = 25.0   # Increased from 12.0
+EXTREME_GREED = 90      
+EXTREME_FEAR = 10       
 
 # --- SESSION TIMES (LAS VEGAS / PDT) ---
 LONDON_START = time(23, 0) # 11:00 PM
@@ -86,28 +86,25 @@ async def run_scan():
     fng_info = f"{fng_val} ({fng_label})"
     active, session_name = get_active_session()
 
+    # --- MODIFIED: BYPASS LULL FOR TESTING ---
     if not active:
-        print(f"💤 {session_name}: Outside hours.")
-        return
+        print(f"⚠️ Outside hours ({session_name}), but running scan anyway...")
+        session_name = f"Testing ({session_name})"
+    else:
+        print(f"🔍 Starting MFBS Scan | {session_name}")
 
-    print(f"🔍 Starting MFBS Scan | {session_name}")
     td = TDClient(apikey=TD_KEY)
     signal_triggered = False 
     
     for symbol in SYMBOLS:
         try:
             print(f"📡 Fetching {symbol}...")
-            # Fetch Daily (Needed for calc but filter is disabled below)
             ts_d = td.time_series(symbol=symbol, interval="1day", outputsize=50).as_pandas()
             await asyncio.sleep(2) 
-            
-            # Fetch H1
             ts_h1 = td.time_series(symbol=symbol, interval="1h", outputsize=100).as_pandas()
             
-            # DAILY TREND (Calculated but set to True to ignore the restriction)
-            ch_l_d, ch_s_d, _ = calculate_chandelier(ts_d)
-            daily_bullish = True # ts_d.iloc[-1]['close'] > ch_l_d.iloc[-1]
-            daily_bearish = True # ts_d.iloc[-1]['close'] < ch_s_d.iloc[-1]
+            daily_bullish = True 
+            daily_bearish = True 
 
             ch_l_h1, ch_s_h1, _ = calculate_chandelier(ts_h1)
             adx_h1 = ts_h1.ta.adx(length=14)['ADX_14'].iloc[-1]
@@ -120,7 +117,6 @@ async def run_scan():
             if latest['close'] > ch_l_h1.iloc[-1] and prev['close'] <= ch_l_h1.iloc[-2]:
                 if not (symbol == "BTC/USD" and fng_val >= EXTREME_GREED):
                     dist = (latest['close'] - ch_l_h1.iloc[-1]) * mult
-                    # Loosened RSI to 75
                     if dist <= MAX_CHASE_PIPS and daily_bullish and adx_h1 > MIN_ADX and rsi_h1 < 75:
                         if await send_msg(symbol, "BUY 📈", latest['close'], ch_l_h1.iloc[-1], adx_h1, fng_info, session_name):
                             signal_triggered = True
@@ -129,7 +125,6 @@ async def run_scan():
             elif latest['close'] < ch_s_h1.iloc[-1] and prev['close'] >= ch_s_h1.iloc[-2]:
                 if not (symbol == "BTC/USD" and fng_val <= EXTREME_FEAR):
                     dist = (ch_s_h1.iloc[-1] - latest['close']) * mult
-                    # Loosened RSI to 25
                     if dist <= MAX_CHASE_PIPS and daily_bearish and adx_h1 > MIN_ADX and rsi_h1 > 25:
                         if await send_msg(symbol, "SELL 📉", latest['close'], ch_s_h1.iloc[-1], adx_h1, fng_info, session_name):
                             signal_triggered = True
