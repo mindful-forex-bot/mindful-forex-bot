@@ -4,9 +4,8 @@ on:
   schedule:
     # 06:00 UTC is 11:00 PM PDT (London Start)
     # 21:00 UTC is 2:00 PM PDT (NY Close)
-    # This covers the high-volume hours for XAU, BTC, and Forex
     - cron: '0 6-21 * * *'
-  workflow_dispatch: # Allows you to manually trigger a scan from the Actions tab
+  workflow_dispatch: # Allows you to manually trigger a scan
 
 jobs:
   build:
@@ -20,7 +19,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip' # Speeds up subsequent runs by caching pandas/numpy
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -30,7 +29,5 @@ jobs:
       - name: Run MFBS Scanner
         env:
           TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
-          # The NTFY_TOPIC is already in your code, but you could also secret-ize it here
-        # 'timeout 300s' kills the process at 5 minutes to prevent infinite hangs
-        # '|| true' keeps the workflow "Green" even if the market is closed or no trades are found
+        # Make sure your python file is actually named bot.py!
         run: timeout 300s python bot.py || true
